@@ -22,7 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Read and clean form values.
     $student_id = trim($_POST['student_id'] ?? '');
-    $full_name = trim($_POST['full_name'] ?? '');
+   $first_name = trim($name_parts[0] ?? '');
+   $last_name = trim($name_parts[1] ?? '');
     $email = trim($_POST['email'] ?? '');
     $phone = trim($_POST['phone'] ?? '');
     $gender = trim($_POST['gender'] ?? '');
