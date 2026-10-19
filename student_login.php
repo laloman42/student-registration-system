@@ -8,8 +8,10 @@ if (isset($_SESSION['student_id'])) {
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    verify_csrf();
-
+    if (!verify_csrf()) {
+        http_response_code(403);
+        exit('Invalid security token. Please reload the page and try again.');
+    }
     $identity = trim($_POST['identity'] ?? '');
     $password = $_POST['password'] ?? '';
 
