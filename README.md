@@ -37,3 +37,27 @@ A web-based Student Registration System developed using PHP, MySQL, HTML, CSS, a
 
 ## Project Purpose
 This project was developed for learning web development and database management.
+## Live Demo
+
+[Open Student Registration System](https://lelisa-student-system.free.nf/)
+
+## Screenshots
+
+### Home Page
+![Home Page](home.png)
+
+### Registration Page
+![Registration Page](registration.png)
+
+### Student Login
+![Student Login](student-login.png)
+
+### Admin Dashboard
+![Admin Dashboard](dashboard.png)
+
+## Technologies Used
+
+- HTML
+- CSS
+- PHP
+- MySQL
