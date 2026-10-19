@@ -4,18 +4,35 @@ require_once "config.php";
 $error = "";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    if (!verify_csrf()) {
+        http_response_code(403);
+        exit("Invalid security token. Please reload the page.");
+    }
+
     $username = trim($_POST["username"] ?? "");
     $password = $_POST["password"] ?? "";
 
-    if ($username === "HIDDEN" && $password === "HIDDEN") {
+    $stmt = $pdo->prepare(
+        "SELECT id, username, password
+         FROM admins
+         WHERE username = ?
+         LIMIT 1"
+    );
+
+    $stmt->execute([$username]);
+    $admin = $stmt->fetch();
+
+    if ($admin && password_verify($password, $admin["password"])) {
         session_regenerate_id(true);
         $_SESSION["admin_logged_in"] = true;
+        $_SESSION["admin_id"] = (int) $admin["id"];
+        $_SESSION["admin_username"] = $admin["username"];
 
         header("Location: admin_dashboard.php");
         exit;
-    } else {
-        $error = "Username ykn password dogoggora.";
     }
+
+    $error = "Username ykn password dogoggora.";
 }
 ?>
 <!DOCTYPE html>
@@ -212,37 +229,43 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
                 </div>
             <?php endif; ?>
 
-            <form method="POST" action="admin_login.php">
+           <form method="POST" action="admin_login.php">
 
-                <div class="form-group">
-                    <label for="username">Username</label>
-                    <input
-                        type="text"
-                        id="username"
-                        name="username"
-                        placeholder="Enter your username"
-                        autocomplete="username"
-                        required
-                    >
-                </div>
+    <input
+        type="hidden"
+        name="csrf_token"
+        value="<?= e(csrf_token()) ?>"
+    >
 
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <input
-                        type="password"
-                        id="password"
-                        name="password"
-                        placeholder="Enter your password"
-                        autocomplete="current-password"
-                        required
-                    >
-                </div>
+    <div class="form-group">
+        <label for="username">Username</label>
+        <input
+            type="text"
+            id="username"
+            name="username"
+            placeholder="Enter your username"
+            autocomplete="username"
+            required
+        >
+    </div>
 
-                <button type="submit" class="login-btn">
-                    ⇥ &nbsp; Login
-                </button>
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input
+            type="password"
+            id="password"
+            name="password"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+            required
+        >
+    </div>
 
-            </form>
+    <button type="submit" class="login-btn">
+        ⇥ &nbsp; Login
+    </button>
+
+</form>
 
             <div class="footer">
                 🔒 Authorized administrators only
