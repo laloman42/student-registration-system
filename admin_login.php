@@ -7,7 +7,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $username = trim($_POST["username"] ?? "");
     $password = $_POST["password"] ?? "";
 
-    if ($username === "admin" && $password === "admin123") {
+    if ($username === "HIDDEN" && $password === "HIDDEN") {
         session_regenerate_id(true);
         $_SESSION["admin_logged_in"] = true;
 
