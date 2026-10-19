@@ -7,13 +7,11 @@ $success = '';
 $student = null;
 $students = [];
 
-/* Update student information */
+/* Process update form */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
-    // Verify CSRF token before processing the form
     if (!verify_csrf()) {
         http_response_code(403);
-        exit('Invalid security token. Please reload the page and try again.');
+        exit('Invalid security token. Please reload the page.');
     }
 
     $id = filter_input(INPUT_POST, 'id', FILTER_VALIDATE_INT);
@@ -35,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $year === false ||
         $year === null ||
         $year < 1 ||
-        $year > 20 ||
+        $year > 6 ||
         !in_array($gender, ['Male', 'Female', 'Other'], true)
     ) {
         $error = 'Please enter valid information in all required fields.';
@@ -46,362 +44,328 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         strlen($phone) > 25 ||
         strlen($department) > 100
     ) {
-        $error = 'One or more fields exceed the allowed length.';
-    } elseif (
-        $phone !== '' &&
-        !preg_match('/^[0-9+\s()-]+$/', $phone)
-    ) {
-        $error = 'Phone number contains invalid characters.';
+        $error = 'One or more fields are too long.';
     } else {
         try {
-            $stmt = $pdo->prepare(
-                "UPDATE students
-                 SET first_name = ?,
-                     last_name = ?,
-                     email = ?,
-                     phone = ?,
-                     department = ?,
-                     year_of_study = ?,
-                     gender = ?
-                 WHERE id = ?"
+            /* Check whether this student exists */
+            $check = $pdo->prepare(
+                "SELECT id FROM students WHERE id = ?"
             );
+            $check->execute([$id]);
 
-            $stmt->execute([
-                $firstName,
-                $lastName,
-                $email,
-                $phone,
-                $department,
-                $year,
-                $gender,
-                $id
-            ]);
-
-            $success = 'Student information updated successfully.';
-
-        } catch (PDOException $e) {
-            error_log($e->getMessage());
-
-            if ($e->getCode() === '23000') {
-                $error = 'This email address is already used by another student.';
+            if (!$check->fetch()) {
+                $error = 'Student not found.';
             } else {
-                $error = 'Could not update student information.';
+                /* Prevent duplicate email addresses */
+                $checkEmail = $pdo->prepare(
+                    "SELECT id FROM students
+                     WHERE email = ? AND id <> ?
+                     LIMIT 1"
+                );
+                $checkEmail->execute([$email, $id]);
+
+                if ($checkEmail->fetch()) {
+                    $error = 'This email is already used by another student.';
+                } else {
+                    /* Update student information */
+                    $update = $pdo->prepare(
+                        "UPDATE students
+                         SET first_name = ?,
+                             last_name = ?,
+                             email = ?,
+                             phone = ?,
+                             department = ?,
+                             year_of_study = ?,
+                             gender = ?
+                         WHERE id = ?"
+                    );
+
+                    $update->execute([
+                        $firstName,
+                        $lastName,
+                        $email,
+                        $phone !== '' ? $phone : null,
+                        $department,
+                        $year,
+                        $gender,
+                        $id
+                    ]);
+
+                    $success = 'Student information updated successfully.';
+                }
             }
+        } catch (PDOException $e) {
+            error_log('Student update error: ' . $e->getMessage());
+            $error = 'Unable to update student information.';
         }
     }
 
-    // Reload the selected student
+    /* Keep the selected student visible after submission */
     if ($id && $id > 0) {
-        $stmt = $pdo->prepare(
-            "SELECT id, student_id, first_name, last_name,
-                    email, phone, department, year_of_study, gender
-             FROM students
-             WHERE id = ?
-             LIMIT 1"
-        );
-
-        $stmt->execute([$id]);
-        $student = $stmt->fetch();
+        $selectedId = $id;
     }
+} else {
+    $selectedId = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 }
 
-/* Select a student from the list */
-if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
-
-    if ($id !== null && $id !== false && $id > 0) {
-        $stmt = $pdo->prepare(
-            "SELECT id, student_id, first_name, last_name,
-                    email, phone, department, year_of_study, gender
-             FROM students
-             WHERE id = ?
-             LIMIT 1"
-        );
-
-        $stmt->execute([$id]);
-        $student = $stmt->fetch();
-
-        if (!$student) {
-            $error = 'Student not found.';
-        }
-    }
-}
-
-/* Load student list when no student is selected */
-if (!$student && $_SERVER['REQUEST_METHOD'] === 'GET') {
-    $stmt = $pdo->query(
-        "SELECT id, student_id, first_name, last_name, email
+/* Load students for the selection list */
+try {
+    $list = $pdo->query(
+        "SELECT id, student_id, first_name, last_name
          FROM students
          ORDER BY id DESC"
     );
+    $students = $list->fetchAll(PDO::FETCH_ASSOC);
 
-    $students = $stmt->fetchAll();
+    /* Load selected student */
+    if (!empty($selectedId) && $selectedId > 0) {
+        $stmt = $pdo->prepare(
+            "SELECT id, student_id, first_name, last_name,
+                    email, phone, department, year_of_study, gender
+             FROM students
+             WHERE id = ?
+             LIMIT 1"
+        );
+        $stmt->execute([$selectedId]);
+        $student = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$student && $error === '') {
+            $error = 'Student not found.';
+        }
+    }
+} catch (PDOException $e) {
+    error_log('Student list error: ' . $e->getMessage());
+    $error = 'Unable to load student records.';
+}
+
+function h($value): string
+{
+    return htmlspecialchars(
+        (string) $value,
+        ENT_QUOTES | ENT_SUBSTITUTE,
+        'UTF-8'
+    );
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Admin - Edit Student</title>
-
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Student</title>
+    <link rel="stylesheet" href="style.css">
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: Arial, sans-serif;
-            background: #f1f5f9;
-            color: #1e293b;
-            margin: 0;
-            padding: 25px 15px;
-        }
-
-        .container {
-            max-width: 900px;
-            margin: auto;
-            background: white;
+        .edit-container {
+            max-width: 850px;
+            margin: 30px auto;
             padding: 25px;
-            border-radius: 12px;
-            box-shadow: 0 4px 15px #0000000d;
+            border-radius: 10px;
+            background: #fff;
+            color: #222;
+            box-shadow: 0 3px 12px rgba(0,0,0,.12);
         }
 
-        h1 {
-            color: #1e3a8a;
+        .edit-container h2 {
+            margin-top: 0;
         }
 
-        .table-wrap {
-            overflow-x: auto;
+        .edit-form {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 15px;
         }
 
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        th, td {
-            text-align: left;
-            padding: 12px;
-            border-bottom: 1px solid #e2e8f0;
-        }
-
-        th {
-            background: #1e3a8a;
-            color: white;
-        }
-
-        label {
+        .edit-form label {
             display: block;
-            margin-top: 14px;
+            margin-bottom: 6px;
             font-weight: bold;
         }
 
-        input, select {
+        .edit-form input,
+        .edit-form select {
             width: 100%;
-            padding: 11px;
-            margin-top: 6px;
-            border: 1px solid #cbd5e1;
-            border-radius: 6px;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #bbb;
+            border-radius: 5px;
         }
 
-        button, .btn {
-            display: inline-block;
-            margin-top: 18px;
-            padding: 11px 16px;
+        .edit-form button {
+            padding: 12px;
             border: 0;
-            border-radius: 6px;
-            background: #2563eb;
+            border-radius: 5px;
+            background: #087fca;
             color: white;
-            text-decoration: none;
             cursor: pointer;
         }
 
-        .back {
-            background: #475569;
-        }
-
-        .error, .success {
+        .message {
             padding: 12px;
-            border-radius: 6px;
             margin: 12px 0;
+            border-radius: 5px;
         }
 
         .error {
-            background: #fee2e2;
-            color: #991b1b;
+            background: #ffe5e5;
+            color: #9b111e;
         }
 
         .success {
-            background: #dcfce7;
-            color: #166534;
+            background: #e2f7e8;
+            color: #17652d;
+        }
+
+        .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .student-list {
+            margin-bottom: 25px;
+        }
+
+        .student-list a {
+            display: inline-block;
+            margin: 5px;
+            padding: 8px 12px;
+            border: 1px solid #087fca;
+            border-radius: 5px;
+            text-decoration: none;
+        }
+
+        @media (max-width: 600px) {
+            .edit-form {
+                grid-template-columns: 1fr;
+            }
+
+            .full-width {
+                grid-column: auto;
+            }
         }
     </style>
 </head>
-
 <body>
-<div class="container">
 
-    <h1>Admin - Edit Student</h1>
+<div class="edit-container">
+    <h2>Edit Student Information</h2>
+
+    <p>
+        <a href="admin_dashboard.php">Back to Admin Dashboard</a>
+    </p>
 
     <?php if ($error !== ''): ?>
-        <div class="error"><?= e($error) ?></div>
+        <div class="message error"><?= h($error) ?></div>
     <?php endif; ?>
 
     <?php if ($success !== ''): ?>
-        <div class="success"><?= e($success) ?></div>
+        <div class="message success"><?= h($success) ?></div>
     <?php endif; ?>
+
+    <div class="student-list">
+        <h3>Select a student to edit</h3>
+
+        <?php if (empty($students)): ?>
+            <p>No students registered yet.</p>
+        <?php else: ?>
+            <?php foreach ($students as $item): ?>
+                <a href="admin_edit_student.php?id=<?= (int) $item['id'] ?>">
+                    <?= h($item['student_id']) ?> -
+                    <?= h($item['first_name'] . ' ' . $item['last_name']) ?>
+                </a>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
 
     <?php if ($student): ?>
+        <h3>
+            Editing:
+            <?= h($student['first_name'] . ' ' . $student['last_name']) ?>
+        </h3>
 
-        <p>
-            Editing student:
-            <strong><?= e($student['student_id']) ?></strong>
-        </p>
+        <form method="POST" action="admin_edit_student.php?id=<?= (int) $student['id'] ?>"
+              class="edit-form">
 
-        <form method="POST" action="admin_edit_student.php">
+            <input type="hidden" name="csrf_token"
+                   value="<?= h(csrf_token()) ?>">
 
-            <input
-                type="hidden"
-                name="csrf_token"
-                value="<?= e(csrf_token()) ?>"
-            >
+            <input type="hidden" name="id"
+                   value="<?= (int) $student['id'] ?>">
 
-            <input
-                type="hidden"
-                name="id"
-                value="<?= (int) $student['id'] ?>"
-            >
-
-            <label for="first_name">First Name *</label>
-            <input
-                id="first_name"
-                name="first_name"
-                maxlength="80"
-                required
-                value="<?= e($student['first_name']) ?>"
-            >
-
-            <label for="last_name">Last Name *</label>
-            <input
-                id="last_name"
-                name="last_name"
-                maxlength="80"
-                required
-                value="<?= e($student['last_name']) ?>"
-            >
-
-            <label for="email">Email *</label>
-            <input
-                id="email"
-                name="email"
-                type="email"
-                maxlength="150"
-                required
-                value="<?= e($student['email']) ?>"
-            >
-
-            <label for="phone">Phone</label>
-            <input
-                id="phone"
-                name="phone"
-                maxlength="25"
-                value="<?= e($student['phone'] ?? '') ?>"
-            >
-
-            <label for="department">Department *</label>
-            <input
-                id="department"
-                name="department"
-                maxlength="100"
-                required
-                value="<?= e($student['department']) ?>"
-            >
-
-            <label for="year_of_study">Year of Study *</label>
-            <input
-                id="year_of_study"
-                name="year_of_study"
-                type="number"
-                min="1"
-                max="20"
-                required
-                value="<?= (int) $student['year_of_study'] ?>"
-            >
-
-            <label for="gender">Gender *</label>
-            <select id="gender" name="gender" required>
-                <?php foreach (['Male', 'Female', 'Other'] as $option): ?>
-                    <option
-                        value="<?= e($option) ?>"
-                        <?= $student['gender'] === $option ? 'selected' : '' ?>
-                    >
-                        <?= e($option) ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-
-            <button type="submit">Save Changes</button>
-
-            <a class="btn back" href="admin_edit_student.php">
-                Student List
-            </a>
-        </form>
-
-    <?php else: ?>
-
-        <h2>Select a Student to Edit</h2>
-
-        <?php if (count($students) > 0): ?>
-
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                    <tr>
-                        <th>Student ID</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Action</th>
-                    </tr>
-                    </thead>
-
-                    <tbody>
-                    <?php foreach ($students as $item): ?>
-                        <tr>
-                            <td><?= e($item['student_id']) ?></td>
-
-                            <td>
-                                <?= e(
-                                    $item['first_name'] . ' ' .
-                                    $item['last_name']
-                                ) ?>
-                            </td>
-
-                            <td><?= e($item['email']) ?></td>
-
-                            <td>
-                                <a href="admin_edit_student.php?id=<?= (int) $item['id'] ?>">
-                                    Edit
-                                </a>
-                            </td>
-                        </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                </table>
+            <div>
+                <label>Student ID</label>
+                <input type="text"
+                       value="<?= h($student['student_id']) ?>"
+                       readonly>
             </div>
 
-        <?php else: ?>
-            <p>No students found.</p>
-        <?php endif; ?>
+            <div>
+                <label for="first_name">First Name</label>
+                <input id="first_name" name="first_name"
+                       maxlength="80" required
+                       value="<?= h($student['first_name']) ?>">
+            </div>
 
+            <div>
+                <label for="last_name">Last Name</label>
+                <input id="last_name" name="last_name"
+                       maxlength="80" required
+                       value="<?= h($student['last_name']) ?>">
+            </div>
+
+            <div>
+                <label for="email">Email</label>
+                <input id="email" type="email" name="email"
+                       maxlength="150" required
+                       value="<?= h($student['email']) ?>">
+            </div>
+
+            <div>
+                <label for="phone">Phone</label>
+                <input id="phone" type="text" name="phone"
+                       maxlength="25"
+                       value="<?= h($student['phone'] ?? '') ?>">
+            </div>
+
+            <div>
+                <label for="department">Department</label>
+                <input id="department" type="text" name="department"
+                       maxlength="100" required
+                       value="<?= h($student['department']) ?>">
+            </div>
+
+            <div>
+                <label for="year_of_study">Year of Study</label>
+                <select id="year_of_study" name="year_of_study" required>
+                    <?php for ($y = 1; $y <= 6; $y++): ?>
+                        <option value="<?= $y ?>"
+                            <?= (int) $student['year_of_study'] === $y
+                                ? 'selected' : '' ?>>
+                            Year <?= $y ?>
+                        </option>
+                    <?php endfor; ?>
+                </select>
+            </div>
+
+            <div>
+                <label for="gender">Gender</label>
+                <select id="gender" name="gender" required>
+                    <?php foreach (['Male', 'Female', 'Other'] as $g): ?>
+                        <option value="<?= h($g) ?>"
+                            <?= $student['gender'] === $g
+                                ? 'selected' : '' ?>>
+                            <?= h($g) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <div class="full-width">
+                <button type="submit">Update Student</button>
+            </div>
+        </form>
+    <?php else: ?>
+        <p>Select a student from the list above to edit their details.</p>
     <?php endif; ?>
-
-    <p>
-        <a class="btn back" href="admin_dashboard.php">
-            Back to Dashboard
-        </a>
-    </p>
-
 </div>
+
 </body>
 </html>
